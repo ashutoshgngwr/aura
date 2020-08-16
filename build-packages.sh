@@ -3,7 +3,7 @@ set -xe
 
 # period in seconds when the job re-runs (used to determine
 # if any PKGBUILDS have changed since last run)
-RUN_INTERVAL="186400"
+RUN_INTERVAL="86400"
 
 # output directory for built packages. used in build_package()
 OUTPUT_DIR="$(pwd)/output"
@@ -55,6 +55,7 @@ build_package() {
   cd "$1"
   sudo -u build makepkg -s --noconfirm --noprogressbar PKGDEST="$OUTPUT_DIR"
   cd ..
+  rm -rf "$1"
 }
 
 main() {
