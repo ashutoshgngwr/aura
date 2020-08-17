@@ -15,6 +15,10 @@ jobs:
       - uses: docker://archlinux:latest
         with:
           entrypoint: ./build-packages.sh
+        env:
+          PGP_KEY_ID: ${{ secrets.PGP_KEY_ID }}
+          PGP_SECRET_KEY: ${{ secrets.PGP_SECRET_KEY }}
+          PGP_SECRET_KEY_PASSPHRASE: ${{ secrets.PGP_SECRET_KEY_PASSPHRASE }}
       - uses: akhileshns/heroku-deploy@v3.4.6
         with:
           heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
