@@ -35,7 +35,7 @@ setup_build_user() {
 # build process.
 install_prerequisites() {
   setup_build_user
-  pacman -Sqyuu --noconfirm --noprogressbar base-devel git
+  pacman -Sqyuu --noconfirm --noprogressbar base-devel git jq
 }
 
 # checks if any PKGBUILDs have been modified since this script was
@@ -44,7 +44,7 @@ install_prerequisites() {
 check_updates() {
   BASE_URL="https://aur.archlinux.org/rpc/?v=5&type=info"
   ARGS=""
-  while read package; do
+  while read package keys; do
     ARGS="$ARGS&arg[]=$package"
   done < "$PACKAGE_LIST"
 
@@ -52,7 +52,8 @@ check_updates() {
   LATEST_UPDATE=$(curl -sSL "$URL" | jq ".results[].LastModified" | sort -r | head -n1)
   NOW="$(date +%s)"
 
-  if [ $(( NOW - LATEST_UPDATE )) -lt "$RUN_INTERVAL" ]; then
+  if [ $(( NOW - LATEST_UPDATE )) -gt "$RUN_INTERVAL" ]; then
+    echo "No PKGBUILD has been modified since last run"
     return 1
   fi
 }
@@ -71,11 +72,7 @@ build_package() {
 
 main() {
   install_prerequisites
-  if ! check_updates; then
-    echo "No PKGBUILD has been modified since last run"
-    exit 0
-  fi
-
+  check_updates
   while read package keys; do
     build_package "$package" "$keys"
   done < "$PACKAGE_LIST"
