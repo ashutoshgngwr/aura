@@ -16,7 +16,6 @@ PACKAGE_LIST="$(pwd)/packagelist"
 # created user 'rwx' permissions on the working directory.
 setup_build_user() {
   useradd -m build
-  gpasswd -a build wheel
   test -d "/etc/sudoers.d" || mkdir -p "/etc/sudoers.d"
   echo "build ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/build
   setfacl -m u:build:rwx . # permissions on current dir and stuff
