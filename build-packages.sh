@@ -12,6 +12,8 @@ OUTPUT_DIR="$(pwd)/output"
 # e.g. "spotify 931FF8E79F0876134EDDBDCCA87FF9DF48BF1C90 2EBF997C15BDA244B6EBF5D84773BD5E130D1D45"
 PACKAGE_LIST="$(pwd)/packagelist"
 
+PGP_KEYSERVER="pool.sks-keyservers.net"
+
 # sets up a non-root user to 'makepkg' script. also gives the newly
 # created user 'rwx' permissions on the working directory.
 setup_build_user() {
@@ -19,15 +21,6 @@ setup_build_user() {
   test -d "/etc/sudoers.d" || mkdir -p "/etc/sudoers.d"
   echo "build ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/build
   setfacl -m u:build:rwx . # permissions on current dir and stuff
-
-  # fix: dirmngr is giving TLS authentication errors when importing keys.
-  # happening because the default keyservers' CA is distributed with the
-  # binaries and its not present in the common CA store?
-  test -d "/home/build/.gnupg" || mkdir -p "/home/build/.gnupg"
-  echo "hkp-cacert /usr/share/gnupg/sks-keyservers.netCA.pem" >> /home/build/.gnupg/dirmngr.conf
-  chown -R build "/home/build/.gnupg"
-  chmod 700 "/home/build/.gnupg"
-  chmod 600 "/home/build/.gnupg/dirmngr.conf"
 }
 
 # sets up the private PGP key passed using the environment variable. This key is used for
@@ -83,7 +76,7 @@ check_updates() {
 # 2. keys: a space seperate list of PGP keys to import for verifying source
 #    signatures during the build
 build_package() {
-  test -z "$keys" || sudo -u build gpg --receive-keys $keys
+  test -z "$keys" || sudo -u build gpg --keyserver="$PGP_KEYSERVER" --receive-keys $keys
   sudo -u build git clone --depth=1 "https://aur.archlinux.org/$1.git"
   cd "$1"
   sudo -u build makepkg -s --noconfirm --noprogressbar PKGDEST="$OUTPUT_DIR"
