@@ -96,8 +96,8 @@ You can use my package repository for demonstrating the results.
 
   - `HEROKU_APP_NAME`: Name of the Heroku app to deploy the package repository.
 
-- To test the setup, commit changes to the default branch (`master`) and check out a new
-  `test` branch afterwards. Push the `test` branch to trigger a GitHub workflow run.
+- To test the setup, commit the changes and then trigger the workflow manually.
+  See [`workflow_dispatch`](https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/).
 
 - To use your new repository with Pacman
 
