@@ -1,3 +1,4 @@
+act
 aic94xx-firmware
 android-studio
 ctop-bin
@@ -18,6 +19,7 @@ polybar
 postman-bin
 scc
 spotify 931FF8E79F0876134EDDBDCCA87FF9DF48BF1C90 2EBF997C15BDA244B6EBF5D84773BD5E130D1D45
+texlive-latexindent-meta
 tor-browser EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
 ttf-font-awesome-4
 virtualbox-ext-oracle
