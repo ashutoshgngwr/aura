@@ -106,7 +106,7 @@ build_package() {
   echo "package: '$1', aura version: '${aura_version:-none}', aur version: '$2'"
   if [ "$aura_version" == "$2" ]; then
     echo "Latest AUR version found in old AURa repository! Downloading..."
-    pacman -Sqw --noconfirm --noprogressbar --cachedir "$output_dir" "$1"
+    pacman -Sqddw --noconfirm --noprogressbar --cachedir "$output_dir" "$1"
   else
     echo "Latest AUR version not found in old AURa repository! Building..."
     test -z "$3" || sudo -u "$build_user" gpg --keyserver="$pgp_keyserver" --receive-keys $3
