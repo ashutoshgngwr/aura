@@ -15,7 +15,9 @@ jobs:
         with:
           entrypoint: ./build-packages.sh
         env:
+          HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
           PGP_KEY_ID: ${{ secrets.PGP_KEY_ID }}
+          PGP_PUBLIC_KEY: ${{ secrets.PGP_PUBLIC_KEY }}
           PGP_SECRET_KEY: ${{ secrets.PGP_SECRET_KEY }}
           PGP_SECRET_KEY_PASSPHRASE: ${{ secrets.PGP_SECRET_KEY_PASSPHRASE }}
       - uses: akhileshns/heroku-deploy@v3.4.6

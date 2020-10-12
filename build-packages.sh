@@ -1,113 +1,151 @@
 #!/usr/bin/env bash
-set -xe
-
-# period in seconds when the job re-runs (used to determine
-# if any PKGBUILDS have changed since last run)
-RUN_INTERVAL="86400"
+set -e
 
 # output directory for built packages. used in build_package()
-OUTPUT_DIR="$(pwd)/output"
+output_dir="$(pwd)/output"
 
-# a file containing AUR packages to build. 1 name per line optionally with GPG keys it needs to import
-# e.g. "spotify 931FF8E79F0876134EDDBDCCA87FF9DF48BF1C90 2EBF997C15BDA244B6EBF5D84773BD5E130D1D45"
-PACKAGE_LIST="$(pwd)/packagelist"
+# a file containing AUR packages to build. 1 name per line optionally with GPG
+# keys it needs to import e.g.
+# "spotify 931FF8E79F0876134EDDBDCCA87FF9DF48BF1C90 2EBF997C15BDA244B6EBF5D84773BD5E130D1D45"
+package_list="$(pwd)/packagelist"
 
-PGP_KEYSERVER="pool.sks-keyservers.net"
+# makepkg and other related commands are run as build_user
+build_user="build"
 
-# sets up a non-root user to 'makepkg' script. also gives the newly
-# created user 'rwx' permissions on the working directory.
+# PGP keyserver used to fetch keys for package source verification
+pgp_keyserver="pool.sks-keyservers.net"
+
+# heroku app URL for current package repository
+aura_base_url="https://${HEROKU_APP_NAME}.herokuapp.com"
+
+# sets up a non-root build_user to run 'makepkg' script. also gives the newly
+# created user 'rwx' permissions on the current working directory.
 setup_build_user() {
-  useradd -m build
+  echo "Setting up '$build_user' user..."
+  useradd -m "$build_user"
   test -d "/etc/sudoers.d" || mkdir -p "/etc/sudoers.d"
-  echo "build ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/build
+  echo "$build_user ALL=(ALL) NOPASSWD:ALL" >> "/etc/sudoers.d/$build_user"
   setfacl -m u:build:rwx . # permissions on current dir and stuff
 }
 
-# sets up the private PGP key passed using the environment variable. This key is used for
-# generating package and repo db signatures. A few GPG conf params are needed to be set to
-# pass passphrase via stdin. https://stackoverflow.com/a/59170001/2410641
-setup_signing_key() {
-  set +x
-  echo -e "$PGP_SECRET_KEY" | gpg --import --batch
-  set -x
+# checks if an old repository deployment exists at the destination Heroku dyno
+is_aura_repository_available() {
+  echo "Waiting for Heroku dyno to wake-up..."
+  curl -sSLo /dev/null "$aura_base_url" || return 1
+}
 
+# adds the AURa repository to the '/etc/pacman.conf'.
+add_aura_repository_to_pacman() {
+  echo "Adding existing AURa repository to Pacman conf..."
+  local pacman_repo_conf="/etc/pacman.conf"
+  echo "[aura]" >> "$pacman_repo_conf"
+  echo "SigLevel = Required TrustedOnly" >> "$pacman_repo_conf"
+  echo "Server = $aura_base_url/aura" >> "$pacman_repo_conf"
+
+  local public_key_file="public.asc"
+  echo -e "$PGP_PUBLIC_KEY" > "$public_key_file"
+  pacman-key --init
+  pacman-key --add "$public_key_file"
+  pacman-key --lsign-key "$PGP_KEY_ID"
+  rm -f "$public_key_file"
+}
+
+# sets up the private PGP key passed using the environment variable. This key is
+# used for generating package and repo db signatures. A few GPG conf params are
+# needed to be set to pass passphrase via stdin.
+# https://stackoverflow.com/a/59170001/2410641
+setup_signing_key() {
+  echo "Adding package signing key to $build_user's PGP keyring..."
+  echo -e "$PGP_SECRET_KEY" | gpg --import --batch
   echo "use-agent" >> "$HOME/.gnupg/gpg.conf"
   echo "pinentry-mode loopback" >> "$HOME/.gnupg/gpg.conf"
   echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
 }
 
-# generates a detached signature for the given file. Accepts the following positional args
+# generates a detached signature for the given file. Accepts the following
+# positional args
 # 1. file path: path of the file to sign
 sign_file() {
-  set +x
   echo "Signing file $1..."
-  echo "$PGP_SECRET_KEY_PASSPHRASE" | gpg --batch --passphrase-fd 0 --detach-sign --no-armor -u "$PGP_KEY_ID" "$1"
-  set -x
+  echo "$PGP_SECRET_KEY_PASSPHRASE" | \
+    gpg --batch --passphrase-fd 0 --detach-sign --no-armor -u "$PGP_KEY_ID" "$1"
 }
 
 # installs any prerequisites required for the build process.
 install_prerequisites() {
+  echo "Installing prerequisites..."
   setup_build_user
+  if is_aura_repository_available; then
+    add_aura_repository_to_pacman
+  fi
+
   pacman -Sqyuu --noconfirm --noprogressbar base-devel git jq
   setup_signing_key
 }
 
-# checks if any PKGBUILDs have been modified since this script was last run. This is determined
-# based on the schedule provided by the 'RUN_INTERVAL' variable
-check_updates() {
-  BASE_URL="https://aur.archlinux.org/rpc/?v=5&type=info"
-  ARGS=""
+# makes a RPC to the AUR API and fetches information for all the packages listed
+# in 'package_list'. Prints the fetched information to 'stdout' in JSON.
+get_package_infos() {
+  local base_url="https://aur.archlinux.org/rpc/?v=5&type=info"
+  local args=""
   while read package keys; do
-    ARGS="$ARGS&arg[]=$package"
-  done < "$PACKAGE_LIST"
+    args="$args&arg[]=$package"
+  done < "$package_list"
 
-  URL="$BASE_URL$ARGS" # leading '&' will be present in $ARGS from the while loop
-  LATEST_UPDATE=$(curl -sSL "$URL" | jq ".results[].LastModified" | sort -r | head -n1)
-  NOW="$(date +%s)"
-
-  if [ $(( NOW - LATEST_UPDATE )) -gt "$RUN_INTERVAL" ]; then
-    echo "No PKGBUILD has been modified since last run"
-    return 1
-  fi
+  curl -sSL "$base_url$args" # leading '&' will be present in 'args' from the loop
 }
 
 # builds a given package using 'makepkg'. accepts the following position args
 # 1. packge name: name of the AUR package being built
-# 2. keys: a space seperate list of PGP keys to import for verifying source
+# 2. aura version: latest version of the package available in current repo. can
+#    be empty but the argument is required
+# 3. keys: a space seperate list of PGP keys to import for verifying source
 #    signatures during the build
 build_package() {
-  test -z "$keys" || sudo -u build gpg --keyserver="$PGP_KEYSERVER" --receive-keys $keys
-  sudo -u build git clone --depth=1 "https://aur.archlinux.org/$1.git"
-  cd "$1"
-  sudo -u build makepkg -s --noconfirm --noprogressbar PKGDEST="$OUTPUT_DIR"
-  sign_file $(ls "$OUTPUT_DIR/$1"-*.pkg.tar.zst)
-  cd ..
-  rm -rf "$1"
+  local aura_version="$(pacman -Ss ^$1$ | head -n1 | awk '{print $2}')"
+  echo "package: '$1', aura version: '${aura_version:-none}', aur version: '$2'"
+  if [ "$aura_version" == "$2" ]; then
+    echo "Latest AUR version found in old AURa repository! Downloading..."
+    pacman -Sqw --noconfirm --noprogressbar --cachedir "$output_dir" "$1"
+  else
+    echo "Latest AUR version not found in old AURa repository! Building..."
+    test -z "$3" || sudo -u "$build_user" gpg --keyserver="$pgp_keyserver" --receive-keys $3
+    sudo -u "$build_user" git clone --depth=1 "https://aur.archlinux.org/$1.git"
+    cd "$1"
+    sudo -u "$build_user" makepkg -s --noconfirm --noprogressbar PKGDEST="$output_dir"
+    cd ..
+    rm -rf "$1"
+  fi
+
+  sign_file $(ls "$output_dir/$1"-*.pkg.tar.zst)
 }
 
-# build_repo_db runs the repo-add script to generate a new db adding all the packages
-# present in the 'OUTPUT_DIR'. It also signs the resulting DB files using 'sign_file'
-# while preserving the file structure mentioned in the following wiki.
+# build_repo_db runs the repo-add script to generate a new db adding all the
+# packages present in the 'output_dir'. It also signs the resulting DB files
+# using 'sign_file' while preserving the file structure mentioned in the
+# following wiki.
 # https://wiki.archlinux.org/index.php/DeveloperWiki:Repo_DB_Signing#[RFC]_Repo_DB_signing_(and_ISO's/other_artefacts)
 build_repo_db() {
-  REPO_BASE="$OUTPUT_DIR/aura"
-  REPO_DB_BASE="$REPO_BASE.db"
-  REPO_DB="$REPO_DB_BASE.tar.gz"
-  REPO_FILES_BASE="$REPO_BASE.files"
-  REPO_FILES="$REPO_BASE.files.tar.gz"
-  repo-add "$REPO_DB" $OUTPUT_DIR/*.pkg.tar.zst
-  sign_file "$REPO_DB"
-  sign_file "$REPO_FILES"
-  ln -rs "$REPO_DB.sig" "$REPO_DB_BASE.sig"
-  ln -rs "$REPO_FILES.sig" "$REPO_FILES_BASE.sig"
+  echo "Building package database..."
+  local repo_base="$output_dir/aura"
+  local repo_db_base="$repo_base.db"
+  local repo_db="$repo_db_base.tar.gz"
+  local repo_files_base="$repo_base.files"
+  local repo_files="$repo_base.files.tar.gz"
+  repo-add "$repo_db" $output_dir/*.pkg.tar.zst
+  sign_file "$repo_db"
+  sign_file "$repo_files"
+  ln -rs "$repo_db.sig" "$repo_db_base.sig"
+  ln -rs "$repo_files.sig" "$repo_files_base.sig"
 }
 
 main() {
   install_prerequisites
-  check_updates
+  local package_infos="$(get_package_infos)"
   while read package keys; do
-    build_package "$package" "$keys"
-  done < "$PACKAGE_LIST"
+    local aur_version=$(echo "$package_infos" | jq -r ".results[] | select(.Name==\"$package\") | .Version")
+    build_package "$package" "$aur_version" "$keys"
+  done < "$package_list"
   build_repo_db
 }
 
