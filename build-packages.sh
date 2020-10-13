@@ -81,6 +81,12 @@ install_prerequisites() {
 
   pacman -Sqyuu --noconfirm --noprogressbar base-devel git jq
   setup_signing_key
+
+  # ensure output_dir is owned by the build_user. If builds starts with a
+  # package that hasn't been updated, it will be downloaded from the old
+  # repository using pacman. If pacman ends up creating the output_dir,
+  # build_user won't have write access to it.
+  test -d "$output_dir" || sudo -u "$build_user" mkdir -p "$output_dir"
 }
 
 # makes a RPC to the AUR API and fetches information for all the packages listed
