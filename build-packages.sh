@@ -4,9 +4,7 @@ set -e
 # output directory for built packages. used in build_package()
 output_dir="$(pwd)/output"
 
-# a file containing AUR packages to build. 1 name per line optionally with GPG
-# keys it needs to import e.g.
-# "spotify 931FF8E79F0876134EDDBDCCA87FF9DF48BF1C90 2EBF997C15BDA244B6EBF5D84773BD5E130D1D45"
+# a file containing AUR packages to build, 1 name per line. e.g "spotify"
 package_list="$(pwd)/packagelist"
 
 # makepkg and other related commands are run as build_user
@@ -94,7 +92,7 @@ install_prerequisites() {
 get_package_infos() {
   local base_url="https://aur.archlinux.org/rpc/?v=5&type=info"
   local args=""
-  while read package keys; do
+  while read package; do
     args="$args&arg[]=$package"
   done < "$package_list"
 
@@ -105,8 +103,6 @@ get_package_infos() {
 # 1. packge name: name of the AUR package being built
 # 2. aura version: latest version of the package available in current repo. can
 #    be empty but the argument is required
-# 3. keys: a space seperate list of PGP keys to import for verifying source
-#    signatures during the build
 build_package() {
   local aura_version="$(pacman -Ss ^$1$ | head -n1 | awk '{print $2}')"
   echo "package: '$1', aura version: '${aura_version:-none}', aur version: '$2'"
@@ -115,9 +111,14 @@ build_package() {
     pacman -Sqddw --noconfirm --noprogressbar --cachedir "$output_dir" "$1"
   else
     echo "Latest AUR version not found in old AURa repository! Building..."
-    test -z "$3" || sudo -u "$build_user" gpg --keyserver="$pgp_keyserver" --receive-keys $3
     sudo -u "$build_user" git clone --depth=1 "https://aur.archlinux.org/$1.git"
     cd "$1"
+
+    # import PGP keys to verify package integrity
+    for key in $(. ./PKGBUILD; echo $validpgpkeys); do
+      sudo -u "$build_user" gpg --keyserver="$pgp_keyserver" --receive-keys "$key"
+    done
+
     sudo -u "$build_user" makepkg -s --noconfirm --noprogressbar PKGDEST="$output_dir"
     cd ..
     rm -rf "$1"
@@ -148,9 +149,9 @@ build_repo_db() {
 main() {
   install_prerequisites
   local package_infos="$(get_package_infos)"
-  while read package keys; do
+  while read package; do
     local aur_version=$(echo "$package_infos" | jq -r ".results[] | select(.Name==\"$package\") | .Version")
-    build_package "$package" "$aur_version" "$keys"
+    build_package "$package" "$aur_version"
   done < "$package_list"
   build_repo_db
 }

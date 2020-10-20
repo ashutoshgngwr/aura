@@ -52,24 +52,15 @@ You can use my package repository for demonstrating the results.
     -Qm`. It will list all the packages that do not belong to any Pacman
     repositories. Then you can filter this list down to the AUR packages.
 
-  - Some packages specify trusted PGP keys to verify their sources. You can find
-    these key IDs in the `validpgpkeys` variable of their PKGBUILDs.
-
-  - Once you have the list with optional PGP key IDs, you can add one package
-    per line in the [packagelist](packagelist) in the following format.
+  - Once you have the list, you can add one package per line in the
+    [packagelist](packagelist), e.g.
 
     ```plain
-    <package_name> <trusted_pgp_key_id_0> ... <trusted_pgp_key_id_n>
+    google-chrome
+    spotify
     ```
 
-    e.g.
-
-    ```plain
-    kubectl-bin
-    tor-browser EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
-    ```
-
-- Generate a PGP key to sign built packages. It is mandatory in this setup.
+- Generate a PGP key to sign the built packages. It is mandatory in this setup.
 
   ```sh
   # use all the defaults and add your Name and email when prompted.
@@ -125,7 +116,7 @@ You can use my package repository for demonstrating the results.
 
 ### Updating build frequency
 
-By default, build is scheduled to run every day. To change it, edit the cron
+By default, build is scheduled to run every day. To change it, edit the Cron
 schedule specified in the [GitHub workflow](.github/workflows/build.yaml).
 
 ## Caveats
