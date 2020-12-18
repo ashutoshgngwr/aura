@@ -29,7 +29,10 @@ setup_build_user() {
 # checks if an old repository deployment exists at the destination Heroku dyno
 is_aura_repository_available() {
   echo "Waiting for Heroku dyno to wake-up..."
-  curl -sSLo /dev/null "$aura_base_url" || return 1
+  local status=$(curl -sSLo /dev/null -w "%{http_code}" "$aura_base_url")
+  if [ "200" != "$status" ]; then
+    return 1
+  fi
 }
 
 # adds the AURa repository to the '/etc/pacman.conf'.
@@ -101,30 +104,29 @@ get_package_infos() {
 
 # builds a given package using 'makepkg'. accepts the following position args
 # 1. packge name: name of the AUR package being built
-# 2. aura version: latest version of the package available in current repo. can
+# 2. package base: to clone the correct AUR git repository for building packages
+# 3. aura version: latest version of the package available in current repo. can
 #    be empty but the argument is required
 build_package() {
   local aura_version="$(pacman -Ss ^$1$ | head -n1 | awk '{print $2}')"
-  echo "package: '$1', aura version: '${aura_version:-none}', aur version: '$2'"
-  if [ "$aura_version" == "$2" ]; then
+  echo "package: '$1', aura version: '${aura_version:-none}', aur version: '$3'"
+  if [ "$aura_version" == "$3" ]; then
     echo "Latest AUR version found in old AURa repository! Downloading..."
     pacman -Sqddw --noconfirm --noprogressbar --cachedir "$output_dir" "$1"
   else
     echo "Latest AUR version not found in old AURa repository! Building..."
-    sudo -u "$build_user" git clone --depth=1 "https://aur.archlinux.org/$1.git"
-    cd "$1"
+    sudo -u "$build_user" git clone --depth=1 "https://aur.archlinux.org/$2.git"
+    cd "$2"
 
     # import PGP keys to verify package integrity
     for key in $(. ./PKGBUILD; echo $validpgpkeys); do
       sudo -u "$build_user" gpg --keyserver="$pgp_keyserver" --receive-keys "$key"
     done
 
-    sudo -u "$build_user" makepkg -s --noconfirm --noprogressbar PKGDEST="$output_dir"
+    sudo -u "$build_user" makepkg -f -s --noconfirm --noprogressbar PKGDEST="$output_dir"
     cd ..
-    rm -rf "$1"
+    rm -rf "$2"
   fi
-
-  sign_file $(ls "$output_dir/$1"-*.pkg.tar.zst)
 }
 
 # build_repo_db runs the repo-add script to generate a new db adding all the
@@ -151,8 +153,14 @@ main() {
   local package_infos="$(get_package_infos)"
   while read package; do
     local aur_version=$(echo "$package_infos" | jq -r ".results[] | select(.Name==\"$package\") | .Version")
-    build_package "$package" "$aur_version"
+    local package_base=$(echo "$package_infos" | jq -r ".results[] | select(.Name==\"$package\") | .PackageBase")
+    build_package "$package" "$package_base" "$aur_version"
   done < "$package_list"
+
+  for file in $(ls $output_dir/*.pkg.tar.zst); do
+    sign_file "$file"
+  done
+
   build_repo_db
 }
 
